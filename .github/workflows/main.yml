@@ -35,7 +35,10 @@ jobs:
 
       - name: Join ZeroTier Network
         run: |
-          & "$env:ProgramFiles\ZeroTier\One\zerotier-cli.exe" join ${{ secrets.ZEROTIER_NETWORK_ID }}
+          $ztPath1 = "C:\Program Files\ZeroTier\One\zerotier-cli.exe"
+          $ztPath2 = "C:\Program Files (x86)\ZeroTier\One\zerotier-cli.exe"
+          $ztExe = if (Test-Path $ztPath1) { $ztPath1 } elseif (Test-Path $ztPath2) { $ztPath2 } else { Write-Error "ZeroTier CLI not found"; exit 1 }
+          & $ztExe join ${{ secrets.ZEROTIER_NETWORK_ID }}
           Start-Sleep -Seconds 10
           $ztIP = (Get-NetIPAddress | Where-Object { $_.InterfaceAlias -like "ZeroTier*" -and $_.AddressFamily -eq "IPv4" }).IPAddress
           if (-not $ztIP) { Write-Error "ZeroTier IP not assigned"; exit 1 }
@@ -45,7 +48,7 @@ jobs:
         run: |
           $headers = @{ Authorization = "Bearer ${{ secrets.ZEROTIER_API_TOKEN }}" }
           $networkId = "${{ secrets.ZEROTIER_NETWORK_ID }}"
-          $nodeId = (& "$env:ProgramFiles\ZeroTier\One\zerotier-cli.exe" info).Split()[2]
+          $nodeId = (& $ztExe info).Split()[2]
           $body = @{ nodeId = $nodeId; authorized = $true } | ConvertTo-Json
           Invoke-RestMethod -Uri "https://api.zerotier.com/api/v1/network/$networkId/member/$nodeId" -Method POST -Headers $headers -Body $body -ContentType "application/json"
 
