@@ -30,18 +30,22 @@ jobs:
           $possiblePaths = @(
             "C:\Program Files\ZeroTier\One\zerotier-cli.exe",
             "C:\Program Files (x86)\ZeroTier\One\zerotier-cli.exe",
-            "C:\ProgramData\ZeroTier\One\zerotier-cli.exe"
+            "C:\ProgramData\ZeroTier\One\zerotier-cli.exe",
+            "F:\ZeroTier\One\zerotier-cli.exe"
           )
           $ztExe = $null
           foreach ($p in $possiblePaths) {
             if (Test-Path $p) { $ztExe = $p; break }
           }
           if (-not $ztExe) {
-            $ztExe = Get-ChildItem -Path "C:\" -Recurse -Filter "zerotier-cli.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            $drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
+            foreach ($d in $drives) {
+              $found = Get-ChildItem -Path $d -Recurse -Filter "zerotier-cli.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($found) { $ztExe = $found.FullName; break }
+            }
           }
           if (-not $ztExe) { Write-Error "ZeroTier CLI not found"; exit 1 }
-
-          echo "ZT_EXE=$($ztExe.FullName)" >> $env:GITHUB_ENV
+          echo "ZT_EXE=$ztExe" >> $env:GITHUB_ENV
 
       - name: Join ZeroTier Network
         run: |
@@ -50,6 +54,24 @@ jobs:
           $ztIP = (Get-NetIPAddress | Where-Object { $_.InterfaceAlias -like "ZeroTier*" -and $_.AddressFamily -eq "IPv4" }).IPAddress
           if (-not $ztIP) { Write-Error "ZeroTier IP not assigned"; exit 1 }
           echo "ZEROTIER_IP=$ztIP" >> $env:GITHUB_ENV
+
+      - name: Authorize ZeroTier Node via API
+        run: |
+          $nodeId = (& $env:ZT_EXE info).Split()[2]
+          $headers = @{
+            "Authorization" = "bearer ${{ secrets.ZEROTIER_API_TOKEN }}"
+            "Content-Type"  = "application/json"
+          }
+          $body = '{"authorized": true}'
+          Invoke-RestMethod -Uri "https://my.zerotier.com/api/network/${{ secrets.ZEROTIER_NETWORK_ID }}/member/$nodeId" -Method POST -Headers $headers -Body $body
+          Write-Host "Node $nodeId authorized in ZeroTier network"
+
+      - name: Verify ZeroTier Status
+        run: |
+          Write-Host "=== ZeroTier Status ==="
+          & $env:ZT_EXE listnetworks
+          & $env:ZT_EXE listpeers
+          Write-Host "======================="
 
       - name: Verify RDP Accessibility
         run: |
@@ -63,4 +85,9 @@ jobs:
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:ZEROTIER_IP"
           Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP
+          Write-Host "Password: $(echo $env:RDP_CREDS)"
+          Write-Host "==================`n"
+          while ($true) {
+              Write-Host "[$(Get-Date)] RDP Active"
+              Start-Sleep -Seconds 300
+          }
