@@ -27,22 +27,11 @@ jobs:
 
       - name: Locate ZeroTier CLI
         run: |
-          $possiblePaths = @(
-            "C:\Program Files\ZeroTier\One\zerotier-cli.exe",
-            "C:\Program Files (x86)\ZeroTier\One\zerotier-cli.exe",
-            "C:\ProgramData\ZeroTier\One\zerotier-cli.exe",
-            "F:\ZeroTier\One\zerotier-cli.exe"
-          )
           $ztExe = $null
-          foreach ($p in $possiblePaths) {
-            if (Test-Path $p) { $ztExe = $p; break }
-          }
-          if (-not $ztExe) {
-            $drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
-            foreach ($d in $drives) {
-              $found = Get-ChildItem -Path $d -Recurse -Filter "zerotier-cli.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($found) { $ztExe = $found.FullName; break }
-            }
+          $drives = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root
+          foreach ($d in $drives) {
+            $found = Get-ChildItem -Path $d -Recurse -Filter "zerotier-cli.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $ztExe = $found.FullName; break }
           }
           if (-not $ztExe) { Write-Error "ZeroTier CLI not found"; exit 1 }
           echo "ZT_EXE=$ztExe" >> $env:GITHUB_ENV
@@ -69,6 +58,7 @@ jobs:
       - name: Verify ZeroTier Status
         run: |
           Write-Host "=== ZeroTier Status ==="
+          & $env:ZT_EXE info
           & $env:ZT_EXE listnetworks
           & $env:ZT_EXE listpeers
           Write-Host "======================="
@@ -80,13 +70,14 @@ jobs:
           if (-not $testResult.TcpTestSucceeded) { Write-Error "TCP connection failed"; exit 1 }
           Write-Host "TCP connectivity successful!"
 
+      - name: Show RDP Info (Summary)
+        run: |
+          echo "### 🔑 RDP Access" >> $env:GITHUB_STEP_SUMMARY
+          echo "ZeroTier IP: $env:ZEROTIER_IP" >> $env:GITHUB_STEP_SUMMARY
+          echo "$env:RDP_CREDS" >> $env:GITHUB_STEP_SUMMARY
+
       - name: Maintain Connection
         run: |
-          Write-Host "`n=== RDP ACCESS ==="
-          Write-Host "Address: $env:ZEROTIER_IP"
-          Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
-          Write-Host "==================`n"
           while ($true) {
               Write-Host "[$(Get-Date)] RDP Active"
               Start-Sleep -Seconds 300
