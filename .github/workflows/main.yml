@@ -28,9 +28,10 @@ jobs:
 
       - name: Install ZeroTier
         run: |
-          Invoke-WebRequest -Uri "https://download.zerotier.com/RELEASES/1.12.2/ZeroTierOne.msi" -OutFile zerotier.msi
-          Start-Process msiexec.exe -ArgumentList "/i zerotier.msi /quiet /norestart" -Wait
-          Remove-Item zerotier.msi -Force
+          $installerPath = "$env:TEMP\ZeroTierOne.msi"
+          Invoke-WebRequest -Uri "https://download.zerotier.com/dist/ZeroTierOne.msi" -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          Remove-Item $installerPath -Force
 
       - name: Join ZeroTier Network
         run: |
