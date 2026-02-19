@@ -1,5 +1,5 @@
 
-name: RDP-ZeroTier
+name: RDP-ngrok
 
 on:
   workflow_dispatch:
@@ -12,66 +12,44 @@ jobs:
     steps:
       - name: Configure Core RDP Settings
         run: |
-          # Aktifkan RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
                            -Name "fDenyTSConnections" -Value 0 -Force
-          # Firewall rule
-          netsh advfirewall firewall delete rule name="RDP-ZeroTier"
-          netsh advfirewall firewall add rule name="RDP-ZeroTier" `
+          netsh advfirewall firewall delete rule name="RDP-ngrok"
+          netsh advfirewall firewall add rule name="RDP-ngrok" `
             dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
       - name: Create RDP User
         run: |
-          # Generate password kompleks
-          Add-Type -AssemblyName System.Web
-          $password = [System.Web.Security.Membership]::GeneratePassword(16,3)
+          $chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}"
+          $password = -join ((1..16) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
-          # Buat user RDP
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
 
           echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
 
-      - name: Install ZeroTier
+      - name: Install ngrok
         run: |
-          $ztUrl = "https://download.zerotier.com/RELEASES/1.12.2/dist/ZeroTierOne.msi"
-          $installerPath = "$env:TEMP\zerotier.msi"
-          Invoke-WebRequest -Uri $ztUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
+          Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile ngrok.zip
+          Expand-Archive ngrok.zip -DestinationPath $env:TEMP
+          Move-Item "$env:TEMP\ngrok.exe" "C:\Windows\System32\ngrok.exe"
+          ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
 
-      - name: Join ZeroTier Network
+      - name: Start ngrok tunnel for RDP
         run: |
-          # Path CLI di Windows runner
-          & "C:\ProgramData\ZeroTier\One\zerotier-cli.bat" join ${{ secrets.ZEROTIER_NETWORK_ID }}
+          Start-Process ngrok "tcp 3389" -NoNewWindow
           Start-Sleep -Seconds 10
-          & "C:\ProgramData\ZeroTier\One\zerotier-cli.bat" listnetworks
+          $tunnels = Invoke-RestMethod http://127.0.0.1:4040/api/tunnels
+          $publicUrl = $tunnels.tunnels.public_url
+          echo "NGROK_URL=$publicUrl" >> $env:GITHUB_ENV
 
-      - name: Verify RDP Accessibility
-        run: |
-          # Ambil IP ZeroTier dari listnetworks
-          $ztInfo = & "C:\ProgramData\ZeroTier\One\zerotier-cli.bat" listnetworks
-          Write-Host "ZeroTier Info: $ztInfo"
-
-          # Extract IP (biasanya di kolom Assigned Addresses)
-          $ztIP = ($ztInfo | Select-String "zt" | ForEach-Object { ($_ -split '\s+')[5] })
-          echo "ZEROTIER_IP=$ztIP" >> $env:GITHUB_ENV
-
-          # Test koneksi RDP
-          $testResult = Test-NetConnection -ComputerName $ztIP -Port 3389
-          if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "TCP connection to RDP port 3389 failed"
-              exit 1
-          }
-          Write-Host "TCP connectivity successful!"
-
-      - name: Maintain Connection
+      - name: Show RDP Access Info
         run: |
           Write-Host "`n=== RDP ACCESS ==="
-          Write-Host "Address: $env:ZEROTIER_IP"
+          Write-Host "Connect using: $env:NGROK_URL"
           Write-Host "Username: RDP"
           Write-Host "Password: $(echo $env:RDP_CREDS)"
           Write-Host "==================`n"
