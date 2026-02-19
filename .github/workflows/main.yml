@@ -9,14 +9,6 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Configure Core RDP Settings
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                           -Name "fDenyTSConnections" -Value 0 -Force
-          netsh advfirewall firewall delete rule name="RDP-ZeroTier"
-          netsh advfirewall firewall add rule name="RDP-ZeroTier" dir=in action=allow protocol=TCP localport=3389
-          Restart-Service -Name TermService -Force
-
       - name: Create RDP User
         run: |
           $password = -join ((33..126) | Get-Random -Count 12 | % {[char]$_})
@@ -33,32 +25,31 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
 
-      - name: Join ZeroTier Network
+      - name: Locate ZeroTier CLI
         run: |
           $possiblePaths = @(
             "C:\Program Files\ZeroTier\One\zerotier-cli.exe",
-            "C:\Program Files (x86)\ZeroTier\One\zerotier-cli.exe"
+            "C:\Program Files (x86)\ZeroTier\One\zerotier-cli.exe",
+            "C:\ProgramData\ZeroTier\One\zerotier-cli.exe"
           )
           $ztExe = $null
           foreach ($p in $possiblePaths) {
             if (Test-Path $p) { $ztExe = $p; break }
           }
+          if (-not $ztExe) {
+            $ztExe = Get-ChildItem -Path "C:\" -Recurse -Filter "zerotier-cli.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
           if (-not $ztExe) { Write-Error "ZeroTier CLI not found"; exit 1 }
 
-          & $ztExe join ${{ secrets.ZEROTIER_NETWORK_ID }}
-          Start-Sleep -Seconds 10
+          echo "ZT_EXE=$($ztExe.FullName)" >> $env:GITHUB_ENV
 
+      - name: Join ZeroTier Network
+        run: |
+          & $env:ZT_EXE join ${{ secrets.ZEROTIER_NETWORK_ID }}
+          Start-Sleep -Seconds 10
           $ztIP = (Get-NetIPAddress | Where-Object { $_.InterfaceAlias -like "ZeroTier*" -and $_.AddressFamily -eq "IPv4" }).IPAddress
           if (-not $ztIP) { Write-Error "ZeroTier IP not assigned"; exit 1 }
           echo "ZEROTIER_IP=$ztIP" >> $env:GITHUB_ENV
-
-      - name: Authorize Device via API
-        run: |
-          $headers = @{ Authorization = "Bearer ${{ secrets.ZEROTIER_API_TOKEN }}" }
-          $networkId = "${{ secrets.ZEROTIER_NETWORK_ID }}"
-          $nodeId = (& $ztExe info).Split()[2]
-          $body = @{ nodeId = $nodeId; authorized = $true } | ConvertTo-Json
-          Invoke-RestMethod -Uri "https://api.zerotier.com/api/v1/network/$networkId/member/$nodeId" -Method POST -Headers $headers -Body $body -ContentType "application/json"
 
       - name: Verify RDP Accessibility
         run: |
@@ -72,9 +63,4 @@ jobs:
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:ZEROTIER_IP"
           Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
-          Write-Host "==================`n"
-          while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active"
-              Start-Sleep -Seconds 300
-          }
+          Write-Host "Password: $(echo $env:RDP
